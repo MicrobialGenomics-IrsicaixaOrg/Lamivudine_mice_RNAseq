@@ -1,1 +1,2 @@
 # Lamivudine_mice_RNAseq
+This repository contains the Rmd code for reproducing the analysis of transcriptomic data (total bulk RNAseq sequencing) obtained from the cerebral cortex and hippocampus of Ts65Dn and WT mice, untreated or treated with lamivudine, in the 'Lamivudine induces transcriptional changes in genes and LINE1 retrotransposons associated to neurocognitive disorders in a mouse model of Down syndrome' study. 
