@@ -1,0 +1,221 @@
+---
+title: "DESeq2 and Functional enrichment of differentially expressed genes"
+output: html_document
+date: "2023-10-24"
+---
+
+## The following script is executed to assess differential gene expression and functional enrichment for all comparison pairs presented in the manuscript.
+
+
+# Load libraries
+
+```{r libraries, warning=FALSE, comment=NA, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("airway")
+library("tximeta")
+library("glmpca")
+library("DESeq2")
+library("tximport")
+library("readr")
+library("tximportData")
+library("ggplot2")
+library("scales") 
+library("viridis")
+library("readxl")
+library("xlsx")
+library("dplyr")
+library("stringr")
+library("NOISeq")
+library("org.Mm.eg.db")
+library("clusterProfiler")
+library("enrichplot")
+library("pathview")
+```
+
+## Load matrix of raw counts and metadata
+
+```{r}
+df <- read.csv("../Lamivudown_RNAseq_study/Expression_Profile.mm10.gene_raw_counts.txt",header=TRUE,sep="\t")
+rownames(df)<-df$ID
+df$ID<-NULL
+
+df<-df %>% 
+  rename_with(~ str_remove(., "X"), everything())
+
+meta <- read_excel("../Lamivudown_RNAseq_study/metadata.xlsx")
+meta<-as.matrix(meta)
+rownames(meta) <- meta[,1]
+meta<-meta[,-1]
+meta<-as.data.frame(meta)
+
+# subset groups and put in the same order
+df_gr <- df[,grep("HPC", colnames(df))] 
+df_gr2 <- df_gr[,!grepl("HPC_wt_t", colnames(df_gr))] 
+gse <- df_gr2[,!grepl("HPC_ts_nt", colnames(df_gr2))] 
+
+coldata<- filter(meta, 
+                 Tissue %in% c("HPC") & 
+                   Group %in% c("TS_T","WT_NT"))
+
+all(rownames(coldata) == colnames(gse))
+gse <- gse[, rownames(coldata)]
+all(rownames(coldata) == colnames(gse))
+
+gse<-as.matrix(gse)
+expr_se <- SummarizedExperiment((gse))
+colData(expr_se) <- DataFrame(coldata)
+
+```
+
+## Prepare data for DESEq2 pre-processing and filtering
+
+```{r}
+expr_de <- DESeqDataSet(expr_se, design = ~ Group)
+dim(expr_de)
+dim(expr_de[rowSums(counts(expr_de)) > 10, ])
+expr_de <- expr_de[rowSums(counts(expr_de)) > 10, ]
+
+expr_de$Group <- factor(expr_de$Group, levels = c("WT_NT","TS_T"))
+```
+
+## Run DESEq2 analysis and get differentially expressed genes at a given cutoff
+
+```{r}
+de_results <- DESeq(expr_de)
+
+DEdat <- results(de_results)
+head(DEdat)
+summary(DEdat)
+DEdat_df<-data.frame(DEdat)
+
+res_DEdat <- (results(de_results, tidy=TRUE))
+head(res_DEdat)
+summary(res_DEdat)
+
+DE_list_raw_p0.05_fc <- subset(DEdat, pvalue < 0.05 & abs(log2FoldChange)>=1.5)
+DE_list_adj_p0.1 <- subset(DEdat, padj < 0.1)
+
+DEGs_raw_p0.05_fc<-as.data.frame(DE_list_raw_p0.05_fc)
+DEGs_adj_p0.1<-as.data.frame(DE_list_adj_p0.1)
+```
+
+## Plot the results from DESeq2 analysis
+
+```{r}
+vsd <- rlog(de_results, blind=FALSE) # Variance stabilizing transformation
+plotPCA(vsd, intgroup="Group") + theme_bw()+geom_point(size=0.5)+ggtitle("Hippocampus")+
+  scale_color_manual(values=c("darkslategray","coral1"))+theme(aspect.ratio=1)
+
+par(mfrow=c(1,1))
+with(DEdat, plot(log2FoldChange, -log10(pvalue), pch=19, col="grey",cex=0.5,main="Hippocampus - TS-t vs WT-nt", xlim=c(-7,7),ylim=c(0,8)))
+with(subset(DEdat, pvalue<.05 & abs(log2FoldChange)>=1.5), points(log2FoldChange, -log10(pvalue), cex=0.5,pch=19, col="goldenrod1"))
+with(subset(DEdat, padj<.1 ), points(log2FoldChange, -log10(pvalue), cex=0.5,pch=19, col="aquamarine"))
+with(subset(DEdat, padj<.05 ), points(log2FoldChange, -log10(pvalue), cex=0.5,pch=19, col="deeppink3"))
+abline(v=c(-1.5,1.5), col="gray35",lwd=2, lty=3)
+abline(h=1.30, col="gray35",lwd=2, lty=3)
+legend("topleft", legend=c( "raw p.val<0.05 & log2|fc|>=1.5", "adj p.val<0.1","adj p.val<0.05"),
+       col=c("goldenrod1", "aquamarine","deeppink3"), pch=19,cex=0.8,box.lty=0,par('usr')[2], par('usr')[4], bty='n')
+dev.off()
+
+par(mar=c(10,10,5,5))
+boxplot(log10(assays(de_results)[["cooks"]]), range=0, las=2)
+dev.off()
+```
+
+## Prepare data for enrichment analysis
+
+```{r}
+OrgDb <- org.Mm.eg.db
+
+df<-as.data.frame(rownames(DE_list_adj_p0.1))
+colnames(df)<-c("gene")
+df$gene2<- lapply(strsplit(as.character(df$gene), "\\,"), "[", 2)
+df$gene <- lapply(strsplit(as.character(df$gene), "\\,"), "[", 1)
+df$gene<-NULL
+rownames(df)<-df$gene2
+
+geneinfo <- AnnotationDbi::select(org.Mm.eg.db, keys=rownames(df),
+                                  columns=c("ENSEMBL","SYMBOL","GENENAME","ENTREZID"), 
+                                  keytype="SYMBOL")
+df_geneinfo<-as.data.frame(geneinfo)
+
+DEGs_p0.1<-as.data.frame(DE_list_adj_p0.1)
+DEGs_p0.1$gene<-rownames(DEGs_p0.1)
+DEGs_p0.1$gene<- lapply(strsplit(as.character(DEGs_p0.1$gene), "\\,"), "[", 2)
+DEGs_p0.1$gene2 <- lapply(strsplit(as.character(DEGs_p0.1$gene), "\\,"), "[", 1)
+rownames(DEGs_p0.1)<-DEGs_p0.1$gene
+rownames(df_geneinfo)<-df_geneinfo$SYMBOL
+DEGs_df_final<-merge(DEGs_p0.1,df_geneinfo,by="row.names")
+DEGs_df_final$gene<-NULL
+DEGs_df_final$gene2<-NULL
+rownames(DEGs_df_final)<-DEGs_df_final$Row.names
+DEGs_df_final$Row.names<-NULL
+
+# enrichment in upregulated genes
+up_df<-DEGs_df_final %>%
+  filter(DEGs_df_final$log2FoldChange > 0)
+# enrichment in downregulated genes
+dw_df<-DEGs_df_final %>%
+  filter(DEGs_df_final$log2FoldChange < 0)
+
+geneList <- as.vector(up_df$log2FoldChange)
+names(geneList) <- up_df$ENTREZID
+gene <- na.omit(up_df$ENTREZID)
+
+```
+
+## GO enrichment analysis
+
+```{r}
+OrgDb <- org.Mm.eg.db
+
+
+ego <- clusterProfiler::enrichGO(gene          = gene,
+                                 OrgDb         = OrgDb,
+                                 universe = df_geneinfo$ENTREZID,
+                                 ont           = "ALL",
+                                 pAdjustMethod = "BH",
+                                 pvalueCutoff  = 0.05,
+                                 qvalueCutoff  = 0.05, 
+                                 readable      = TRUE)
+head(summary(ego)[,-16])
+df_ego<-as.data.frame(ego)
+barplot(ego, showCategory=25)
+
+clusterProfiler::dotplot(ego, showCategory=20,font.size=8)
+
+OE_foldchanges <- DEGs_df_final$log2FoldChange
+names(OE_foldchanges) <- DEGs_df_final$SYMBOL
+OE_foldchanges <- ifelse(OE_foldchanges > 2, 2, OE_foldchanges)
+OE_foldchanges <- ifelse(OE_foldchanges < -2, -2, OE_foldchanges)
+cnetplot(ego,categorySize="pvalue", 
+         showCategory = 15,foldChange=OE_foldchanges, 
+         vertex.label.font=3,color_category="cyan2",
+         cex_label_gene=0.3,cex_label_category=0.5)
+```
+
+## KEGG enrichment analysis
+
+```{r}
+kegg_enrich <- clusterProfiler::enrichKEGG(gene         = gene,
+                                  organism     = 'mmu',
+                                  pAdjustMethod = "BH",
+                                  pvalueCutoff = 0.05,
+                                  qvalueCutoff  = 0.05)
+
+head(summary(kegg_enrich)[,-8])
+
+cnetplot(kegg_enrich, categorySize="pvalue", 
+  showCategory = 15, foldChange=geneList, 
+  vertex.label.font=3,color_category="cyan2",
+  cex_label_gene=0.3,cex_label_category=0.5)
+
+# pathway visualization
+browseKEGG(kegg_enrich, 'mmu04512')
+mmu04151 <- pathview(gene.data  = geneList,
+                     pathway.id = "mmu04151",
+                     species    = "mmu",
+                     limit      = list(gene=max(abs(geneList)), cpd=1))
+
+```
+
