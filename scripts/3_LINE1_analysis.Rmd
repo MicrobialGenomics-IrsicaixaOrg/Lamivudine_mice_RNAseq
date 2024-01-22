@@ -1,0 +1,113 @@
+---
+title: "3_LINE1_analysis"
+output: html_document
+date: "2024-01-08"
+---
+
+## The following script is executed to assess differential LINE1 expression for all comparison pairs presented in the manuscript.
+
+
+```{r libraries, warning=FALSE, comment=NA, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(ggplot2)
+library(readxl)
+library(ggpubr)
+library(reshape)
+library(reshape2)
+library(tidyverse)
+library("DESeq2")
+```
+
+
+# Load  gene count matrix, LINE1 count matrix and metadata (raw LINE1 counts obtained from telescope2)
+```{r}
+dat_list<-LINE1_raw_counts.txt
+df_genes<-Expression_Profile.mm10.gene_raw_counts.txt
+meta<-metadata.xlsx
+total_counts<-Total_LINE1_counts.txt
+```
+
+
+## Compare the proportion of counts mapping LINE1/ OF COUNTS MAPPING LINE1/TOTAL COUNTS (te + genes from bam) BETWEEN GROUPS ##
+```{r}
+df_LINE1_counts<-data.frame(colSums(dat_list))
+colnames(df_LINE1_counts)<-c("LINE1counts")
+df_LINE1_counts$Sample<-rownames(df_LINE1_counts)
+
+total_counts <- read.csv("/Users/aborgognone2/Documents/Epimol/Lamivudown/RNAseq_irsi/4_TE_expression_April23/total_reads_from_bam/total_reads_files/all_total_counts.txt",header=FALSE,sep="\t")
+colnames(total_counts)<-c("Sample","counts_total")
+
+final_df<-left_join(df_LINE1_counts,total_counts,by="Sample")
+final_df$proportionLINE1<-(final_df$LINE1counts/as.numeric(final_df$counts_total))*100
+
+meta <- read_excel("/Users/aborgognone2/Documents/Epimol/Lamivudown/RNAseq_irsi/metadata.xlsx")
+
+final_meta<-left_join(final_df,meta,by="Sample")
+
+final_meta$Group<-factor(final_meta$Group,levels=c("TS_T","TS_NT","WT_T","WT_NT"))
+
+sub_tissue<-final_meta[final_meta$Tissue == "HPC", ]
+my_comparisons <- list( c("WT_NT", "WT_T"),c("TS_NT", "TS_T"),
+                        c("TS_T", "WT_T"),c("TS_T", "WT_NT"), 
+                        c("TS_NT", "WT_T"),c("TS_NT", "WT_NT") )
+  ggplot(sub_tissue,aes(x=Group,y=proportionLINE1,fill=Group))+
+  scale_fill_manual(values=c("cadetblue3","aliceblue","coral","antiquewhite1"))+
+  geom_boxplot(lwd=0.3)+
+  stat_compare_means(comparisons = my_comparisons)+ 
+  #  stat_compare_means(label.y = 50)+
+  ylab("LINE1 counts / total counts")+xlab("")+
+  theme_bw()
+
+
+  ## COMPARE PROPORTION OF COUNTS OF EACH LINE1 FAMILY /TOTAL COUNTS (te + genes from bam) BETWEEN GROUPS ##
+  
+dat_list2<-dat_list
+dat_list2$LINE1family<-rownames(dat_list)
+
+dat_list2<-dat_list2 %>% 
+  select(LINE1family, everything())
+
+dat_list2$LINE1family <- sub("_[^_]+$", "", dat_list2$LINE1family)
+
+# sum counts for each L1 family (rows) and do that for each sample (column)
+L1familycounts<-aggregate(.~LINE1family,data=dat_list2,FUN=sum)
+
+t_L1familycounts<-t(L1familycounts)
+colnames(t_L1familycounts) <- t_L1familycounts[1,]
+t_L1familycounts <- data.frame(t_L1familycounts[-1, ])
+t_L1familycounts<- mutate_all(t_L1familycounts, function(x) as.numeric(as.character(x)))
+t_L1familycounts$Sample<-rownames(t_L1familycounts)
+
+L1families_totCounts<-left_join(total_counts,t_L1familycounts,by="Sample")
+rownames(L1families_totCounts)<-L1families_totCounts$Sample
+L1families_totCounts$Sample<-NULL
+
+perc_L1families<-(L1families_totCounts/L1families_totCounts$counts_total)*100
+perc_L1families$counts_total<-NULL
+perc_L1families$Sample<-rownames(perc_L1families)
+
+percL1fam_meta<-left_join(perc_L1families,meta,by="Sample")
+
+sub<- filter(percL1fam_meta, 
+                  Tissue %in% c("CRT") & 
+                   Group %in% c("TS_T","TS_NT"))
+sub_melt<-melt(sub)
+
+df_res<-compare_means(value ~ Group, data = sub_melt,group.by = "variable",method="wilcox.test")  
+
+sign<-as.data.frame(c("HAL1ME","L1","L1Md_T"))
+colnames(sign)<-c("L1family")
+select_sign<-sub_melt %>%
+  filter(variable %in% sign$L1family)
+
+ggplot(select_sign,aes(x=Group,y=value,fill=Group))+
+  scale_fill_manual(values=c("aliceblue","antiquewhite1"))+
+  geom_violin(lwd=0.3)+
+  stat_compare_means(paired=FALSE,label = "p.format",size=2.5)+ 
+  facet_wrap(~ variable,scales = "free_y")+
+  #  stat_compare_means(label.y = 50)+
+  ylab("LINE1 family counts / total counts")+xlab("")+
+  theme_bw()
