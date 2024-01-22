@@ -1,0 +1,172 @@
+---
+title: "Rescued Genes"
+output: html_document
+date: "2023-10-24"
+---
+
+```{r libraries, warning=FALSE, comment=NA, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("biomaRt")
+library("pheatmap")
+library("airway")
+library("tximeta")
+library("glmpca")
+library("DESeq2")
+library("tximport")
+library("readr")
+library("tximportData")
+library("ggplot2")
+library("scales") 
+library("viridis")
+library("readxl")
+library("xlsx")
+library("dplyr")
+library("stringr")
+```
+
+## Hsa - Mmus orthologous gene mapping 
+
+```{r}
+human <- useEnsembl("ensembl", dataset = "hsapiens_gene_ensembl",mirror = "useast",host = "https://dec2021.archive.ensembl.org/",verbose=TRUE)
+mouse <- useEnsembl("ensembl", dataset = "mmusculus_gene_ensembl",mirror = "useast",host = "https://dec2021.archive.ensembl.org/",verbose=TRUE)
+
+# For CRT
+annot_table <-getLDS(
+  mart = mouse,
+  attributes = c('ensembl_gene_id','external_gene_name','chromosome_name'),
+  martL = human,
+  attributesL = c('ensembl_gene_id','external_gene_name','chromosome_name','gene_biotype'),
+  filters = 'external_gene_name',
+  values = c("1500004A13Rik","Abca8a","Alg14","App","Armcx3","B3galt5","Capza1","Cbr1","Cbr3","Cct8","Crispld1","Cryzl1","Ctss","Ets2","Fank1","Gart","Gbp11","Gm10698","Gm31096","Gm40594","Ifnar2","Ikbkg","Mapk4","Napepld","Olfm5","Pms1","Rps3a1","Rsph3b","Sec24d","Serpina3n","Shc4","Slc5a3","Slc8a3","Smad4","Tfb1m","Tmem183a","Vil1","Zbtb21","Zfp141","Zfp605","1700001O22Rik","6030426L16Rik","Apoc1","AW047730","C030002A05Rik","C4b","Cdk5r2","Coq2","Dnah1","Dtymk","E2f2","Emilin2","F630048H11Rik","Gm4705","Gm5617","LOC115487357","LOC115489711","LOC115490341","Lrba","Mxd4","Myl4","Omp","Pcdhgb6","Rbl1","Rbm3","Tbxas1","Ucp2"))
+
+# For HPC
+annot_table <-getLDS(
+  mart = mouse,
+  attributes = c('ensembl_gene_id','external_gene_name','chromosome_name'),
+  martL = human,
+  attributesL = c('ensembl_gene_id','external_gene_name','chromosome_name','gene_biotype'),
+  filters = 'external_gene_name',
+  values = c("1700010I14Rik","2810407A14Rik","4930467D21Rik","4932438H23Rik","6530403H02Rik","Abhd14b","Adamts1","Adamts5","Angptl4","App","B3galt5","Bace2","BC067074","Bche","BE949265","Bfsp2","Bst2","C730002L08Rik","Capn6","Capza1","Car14","Ccdc113","Ccdc157","Ccdc18","Cfap52","Chaf1b","Chia1","Chordc1","Clic6","Cln5","Cpn1","Cpsf6","Ctss","Cyb5r1","Dlx6os1","Dtx3l","Ets2","Ezr","Fam161a","Fdft1","Gm10698","Gm15310","Gm1604a","Gm17518","Gm20939","Gm34567","Gm6316","Gpld1","Gsn","H2ac19","H2ac20","Hacd4","Htr3a","Ifi44","Igfn1","Itga7","Itk","Lgals3","LOC102635948","LOC115486418","Lonp2","Lrriq1","Ly6e","Mapk3","Mfsd7a","Mia","Mrps25","Mtfr1","Ndufaf6","Nnmt","Npr1","Nt5dc2","Olig2","Ostf1","Pck2","Pcolce2","Plbd1","Plcl2","Plpp1","Plscr2","Prdm15","R3hcc1l","Rab38","Retreg1","Rgs12","Rorc","Samd9l","Sbspon","Sec24d","Slc12a4","Slc15a4","Slc16a6","Slc22a5","Slc25a20","Slc27a3","Slc39a4","Smim5","Sowahc","Sytl3","Them4","Tiam2","Tmed5","Tmem159","Tmem179b","Tmem41b","Tuba8","Tuft1","Ucma","Ugdh","Zbtb21","Zfp605","Zpld1","1700001O22Rik","2410018L13Rik","4831440E17Rik","Acan","Adamts3","Alpk1","Arpin","Btbd8","Ccdc9","Cebpd","Coq2","Coro1c","Dach1","Dbp","Deaf1","Dipk2a","Dnah1","Doc2a","Epha10","Epha7","Fam50a","Fbl","Gak","Gatc","Gclc","Gm15446","Gm16938","Gm17202","Gm2061","Gm36855","Gon4l","Gstm7","Hba-a2","Hfm1","Hsd17b11","Isoc2b","Kalrn","Kcnab3","Kcnh3","Kifc3","Lct","Lgr6","LOC102632463","Lrba","Med13l","Mfsd3","Mfsd4a","Mxd4","Neurod2","Parn","Particl","Pcdhb2","Pcdhb4","Pcdhga11","Pik3r3","Pim3","Pkd2","Plcxd1","Rbm3","Rfx5","Rhbdl3","Rsad1","Scn4b","Sdad1","Sephs2","Shfl","Sox12","Syt2","Thbs4","Tmem271","Wars2","Wfs1","Xpa","Zfp33b","Zscan21"))
+
+CRT_chr10_mm <- annot_table[grep("10", annot_table$Chromosome.scaffold.name), ]
+CRT_chr16_mm <- annot_table[grep("16", annot_table$Chromosome.scaffold.name), ]
+CRT_chr17_mm <- annot_table[grep("17", annot_table$Chromosome.scaffold.name), ]
+
+HPC_chr10_mm <- annot_table[grep("10", annot_table$Chromosome.scaffold.name), ]
+HPC_chr16_mm <- annot_table[grep("16", annot_table$Chromosome.scaffold.name), ]
+HPC_chr17_mm <- annot_table[grep("17", annot_table$Chromosome.scaffold.name), ]
+
+# For CRT
+FC_df<-read.table("../Lamivudown_RNAseq_study/CRT_rescued_up_dw.txt",header=TRUE)
+# For HPC
+FC_df<-read.table("../Lamivudown_RNAseq_study/HPC_rescued_up_dw.txt",header=TRUE)
+
+annot_table2<-left_join(annot_table, FC_df, by = "Gene.name")
+
+up<-annot_table2[annot_table2$log2FoldChange == "Up", ]
+up_genes_freq_HSA<-up$Chromosome.scaffold.name.1 %>% as.data.frame %>%
+  rename(Var='.') %>%
+  group_by(Var) %>% summarise(N=n())
+up_genes_freq_HSA$FC<-c("Up")
+
+up_genes_freq_MM<-up$Chromosome.scaffold.name %>% as.data.frame %>%
+  rename(Var='.') %>%
+  group_by(Var) %>% summarise(N=n())
+up_genes_freq_MM$FC<-c("Up")
+
+dw<-annot_table2[annot_table2$log2FoldChange == "Down", ]
+dw_genes_freq_HSA<-dw$Chromosome.scaffold.name.1 %>% as.data.frame %>%
+  rename(Var='.') %>%
+  group_by(Var) %>% summarise(N=n())
+dw_genes_freq_HSA$FC<-c("Down")
+
+dw_genes_freq_MM<-dw$Chromosome.scaffold.name %>% as.data.frame %>%
+  rename(Var='.') %>%
+  group_by(Var) %>% summarise(N=n())
+dw_genes_freq_MM$FC<-c("Down")
+
+final_HSA<-rbind(up_genes_freq_HSA,dw_genes_freq_HSA)
+final_HSA$Var<-factor(final_HSA$Var,levels=c('1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','X'))
+
+final_MM<-rbind(up_genes_freq_MM,dw_genes_freq_MM)
+final_MM$Var<-factor(final_MM$Var,levels=c('1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','X'))
+
+ggplot(final_HSA,aes(x=Var,y=N))+
+  geom_bar(aes(fill=FC),stat = 'identity')+
+  scale_y_continuous(labels = scales::comma_format(accuracy = 2))+
+  xlab('HSA chromosome')+ylab('number of DE genes')+
+  theme_bw()+
+  geom_text(
+    aes(label = after_stat(y), group = Var), 
+    stat = 'summary', fun = sum, vjust = -0.5,size=2)+
+  scale_fill_manual(values=c("slategray2","lightslateblue"))
+
+ggplot(final_MM,aes(x=Var,y=N))+
+  geom_bar(aes(fill=FC),stat = 'identity')+
+  scale_y_continuous(labels = scales::comma_format(accuracy = 2))+
+  xlab('MM chromosome')+ylab('number of DE genes')+
+  theme_bw()+
+  geom_text(
+    aes(label = after_stat(y), group = Var), 
+    stat = 'summary', fun = sum, vjust = -0.5,size=2)+
+  scale_fill_manual(values=c("slategray2","lightslateblue"))
+```
+
+## Heatmap rescued genes orthologous Hsa21
+
+```{r}
+# run L1-L78 from '1_DESeq2_FunctionalEnrichment_genes.Rmd' subsetting "TS_NT" and "WT_NT" for each tissue and then the following chunk
+
+rld <- rlog(expr_de, blind=FALSE)
+head(assay(rld), 3)
+mx_norm<-as.matrix(assay(rld))
+
+# for CRT
+list_rescued_genes_ch16_17<-c("66609,Cryzl1","53881,Slc5a3","114565,Zbtb21","14450,Gart",
+                              "109857,Cbr3","11820,App","23872,Ets2","12469,Cct8","12408,Cbr1",
+                              "93961,B3galt5","15976,Ifnar2","246707,Emilin2",
+                              "224481,Tfb1m","12268,C4b","100037282,Rsph3b")
+# for HPC
+list_rescued_genes_ch10_16_17<-c("432508,Cpsf6","268301,Sowahc","74978,Lrriq1","16404,Itga7","114565,Zbtb21",
+                              "110749,Chaf1b","74387,4932438H23Rik","56175,Bace2","11504,Adamts1","23794,Adamts5","114604,Prdm15",
+                              "209195,Clic6","11820,App","23872,Ets2","93961,B3galt5","50913,Olig2","74108,Parn","12609,Cebpd",
+                              "209200,Dtx3l","545156,Kalrn","239852,Zpld1","224860,Plcl2",
+                              "66931,1700010I14Rik","22350,Ezr","57875,Angptl4","24001,Tiam2","83672,Sytl3")
+
+
+names<-data.frame(rownames(mx_norm))
+
+matrix_resc_genes <- as.data.frame(subset(mx_norm, rownames(mx_norm) %in% list_rescued_genes_ch16_17))
+print(matrix_resc_genes)
+matrix_resc_genes$ID<-rownames(matrix_resc_genes)
+matrix_resc_genes$Gene <- lapply(strsplit(as.character(matrix_resc_genes$ID), "\\,"), "[", 2)
+matrix_resc_genes$ID <- lapply(strsplit(as.character(matrix_resc_genes$ID), "\\+"), "[", 1)
+matrix_resc_genes$ID<-NULL
+
+
+matrix2<-matrix_resc_genes
+rownames(matrix2)<-matrix2$Gene
+matrix2$Gene<-NULL
+matrix2<-as.matrix(matrix2)
+
+my_sample_col2 <- data.frame(coldata$Group)
+colnames(my_sample_col2)<-c("Group")
+row.names(my_sample_col2) <- colnames(matrix2)
+
+my_sample_row <- data.frame(list_rescued_genes_ch16_17)
+colnames(my_sample_row)<-c("gene")
+my_sample_row<-gsub(".*,", "", my_sample_row$gene)
+my_sample_row<-data.frame(my_sample_row)
+colnames(my_sample_row)<-c("gene")
+my_sample_row$chr <- (chr = rep(c("chr_16", "chr_17"), c(11,4)))
+#my_sample_row$chr <- (chr = rep(c("chr_10","chr_16", "chr_17"), c(4,17,6)))
+rownames(my_sample_row)<-my_sample_row$gene
+my_sample_row$gene<-NULL
+
+pdf("heatmap.pdf",
+    width = 5.5,
+    height = 6)
+pheatmap(matrix2, color = hcl.colors(50, "PuOr"),annotation_col = my_sample_col2,annotation_row =my_sample_row,scale = "row")
+dev.off() 
+```
+
