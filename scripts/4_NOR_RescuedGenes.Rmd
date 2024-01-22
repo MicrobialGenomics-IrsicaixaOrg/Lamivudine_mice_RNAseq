@@ -1,0 +1,181 @@
+---
+title: "4_NOR_RescuedGenes"
+output: html_document
+date: "2024-01-08"
+---
+
+## The following script is executed to classify mice based on recognition memory test score (discrimination index) and correlate behavioural outputs with rescued gene expression.
+
+
+```{r libraries, warning=FALSE, comment=NA, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(ggplot2)
+library(readxl)
+library(ggpubr)
+library(reshape)
+library(reshape2)
+library(tidyverse)
+library("DESeq2")
+```
+
+
+# Load  NOR score for each sample
+```{r}
+NOR<-DI_4M_delta_classification.txt
+```
+
+# plot learning performance (DI_4 - DI_baseline) classification for each experimental group
+```{r}
+df_sum <- df %>%
+  group_by(Group,delta_group_3SEM) %>%
+  summarise( 
+    n=n(),
+    mean=mean(delta),
+    sd=sd(delta)
+  ) %>%
+  mutate( se=sd/sqrt(n))  %>%
+  mutate( ic=se * qt((1-0.05)/2 + .5, n-1))
+
+df_sum$Group<-factor(df_sum$Group,levels=c("WT_NT","WT_T","TS_NT","TS_T"))
+
+res<-compare_means(delta ~ Group, data = NOR,group.by = "delta_group_3SEM")
+
+ggplot(df_sum) +
+  geom_bar( aes(x=Group, y=abs(mean)), stat="identity", fill="darkslategray4", alpha=0.7) +
+  geom_errorbar( aes(x=Group, ymin=abs(mean-se), ymax=abs(mean+se)), width=0.2, colour="grey35", alpha=0.9, size=0.7) +
+  facet_wrap(~delta_group_3SEM,scales="free_x") + ylab("abs (mean Δ DI)")+ ylim (0,90)+
+  theme_bw()+theme(axis.text.x = element_text(angle=45,hjust=1,size=7))+xlab("")
+```
+
+# correlation rescued genes and DI_4M
+```{r}
+gene_df <- Expression_Profile.mm10.gene_raw.txt
+rownames(gene_df)<-gene_df$ID
+gene_df$ID<-NULL
+
+gene_df<-gene_df %>% 
+  rename_with(~ str_remove(., "X"), everything())
+
+df_sub <- gene_df[,grep("CRT", colnames(gene_df))] 
+#df_sub <- gene_df[,grep("HPC", colnames(gene_df))] 
+
+
+meta <- metadata.xlsx
+meta<-as.matrix(meta)
+rownames(meta) <- meta[,1]
+meta<-meta[,-1]
+meta<-as.data.frame(meta)
+coldata<- filter(meta, 
+                 Tissue %in% c("CRT"))
+
+#coldata<- filter(meta, 
+#                 Tissue %in% c("HPC"))
+
+all(rownames(coldata) == colnames(df_sub))
+gse <- df_sub[, rownames(coldata)]
+all(rownames(coldata) == colnames(gse))
+
+gse<-as.matrix(gse)
+
+expr_se <- SummarizedExperiment((gse))
+colData(expr_se) <- DataFrame(coldata)
+expr_de <- DESeqDataSet(expr_se, design = ~ Treatment)
+                  
+dim(expr_de)
+dim(expr_de[rowSums(counts(expr_de)) > 10, ])
+expr_de <- expr_de[rowSums(counts(expr_de)) > 10, ]
+rld <- rlog(expr_de, blind=FALSE)
+head(assay(rld), 3)
+mx_norm<-as.matrix(assay(rld))
+rownames(mx_norm) <- sub(".*,\\s*", "", rownames(mx_norm))
+
+## Upregulated rescued genes ##
+
+# CRT
+list_rescued_genes_up<-c("Cct8","Zbtb21","Abca8a","B3galt5","Cbr3","Slc5a3","Zfp605","Pms1","Sec24d","Gart","Olfm5","Ets2","Napepld","Smad4","Mapk4","Gm31096","Crispld1","Gbp11","Ifnar2","App")
+
+# HPC
+list_rescued_genes_up<-c('Ezr','Dlx6os1','2810407A14Rik','6530403H02Rik','Gm10698','LOC115486418','App','Angptl4','Dtx3l','Adamts1','Tmem41b','Hacd4','Mfsd7a','Tiam2','Bche','B3galt5','Sytl3','Tuba8','4932438H23Rik','Rorc')
+
+names<-data.frame(rownames(mx_norm))
+matrix_resc_genes_up <- as.data.frame(subset(mx_norm, rownames(mx_norm) %in% list_rescued_genes_up))
+print(matrix_resc_genes_up)
+matrix_resc_genes_up$ID<-rownames(matrix_resc_genes_up)
+matrix_resc_genes_up$Gene <- lapply(strsplit(as.character(matrix_resc_genes_up$ID), "\\,"), "[", 2)
+matrix_resc_genes_up$ID <- lapply(strsplit(as.character(matrix_resc_genes_up$ID), "\\+"), "[", 1)
+matrix_resc_genes_up$ID<-NULL
+
+up_t_matrix<-data.frame(t(matrix_resc_genes_up))
+up_t_matrix$mean_up<-rowMeans(up_t_matrix[,1:20])
+up_t_matrix$ID<-rownames(up_t_matrix)
+up_t_matrix<-data.frame(up_t_matrix$mean_up,up_t_matrix$ID)
+rownames(up_t_matrix)<-up_t_matrix$up_t_matrix.ID
+
+## Downregulated rescued genes ##
+
+# CRT
+list_rescued_genes_down<-c('Pcdhgb6','Coq2','Dnah1','Gm4705','Apoc1','Gm5617','Emilin2','E2f2','C4b','LOC115487357','F630048H11Rik','6030426L16Rik','LOC115490341','Ucp2','Lrba','AW047730','Omp','LOC115489711','Dtymk','Rbm3')
+
+# HPC
+list_rescued_genes_down<-c("Rfx5","Syt2","Lrba","Particl","Coq2","Gm2061","Coro1c","Gm36855","Pcdhga11","Epha7","Fbl","Pkd2","Doc2a","Tmem271","Kcnab3","Btbd8","LOC102632463","Gclc","Mfsd4a","Arpin")
+
+names<-data.frame(rownames(mx_norm))
+matrix_resc_genes_down <- as.data.frame(subset(mx_norm, rownames(mx_norm) %in% list_rescued_genes_down))
+print(matrix_resc_genes_down)
+matrix_resc_genes_down$ID<-rownames(matrix_resc_genes_down)
+matrix_resc_genes_down$Gene <- lapply(strsplit(as.character(matrix_resc_genes_down$ID), "\\,"), "[", 2)
+matrix_resc_genes_down$ID <- lapply(strsplit(as.character(matrix_resc_genes_down$ID), "\\+"), "[", 1)
+matrix_resc_genes_down$ID<-NULL
+
+down_t_matrix<-data.frame(t(matrix_resc_genes_down))
+down_t_matrix$mean_down<-rowMeans(down_t_matrix[,1:20])
+down_t_matrix$ID<-rownames(down_t_matrix)
+down_t_matrix<-data.frame(down_t_matrix$mean_down,down_t_matrix$ID)
+rownames(down_t_matrix)<-down_t_matrix$down_t_matrix.ID
+
+index_df<-merge(up_t_matrix,down_t_matrix, by = 'row.names', all = TRUE)
+index_df$up_t_matrix.ID<-NULL
+index_df$down_t_matrix.ID<-NULL
+colnames(index_df)<-c('ID','mean_up_genes','mean_down_genes')
+index_df$ratio<-index_df$mean_up_genes/index_df$mean_down_genes
+rownames(index_df)<-index_df$ID
+rownames(index_df)<-gsub("CRT", "", rownames(index_df))
+
+
+NOR<-DI_4M_delta_classification.txt
+rownames(NOR)<-NOR$ID
+
+index_NOR_df<-merge(index_df,NOR, by = 'row.names', all = TRUE)
+index_NOR_df$ID.x<-NULL
+
+ggplot(index_NOR_df, aes(DI_4M,ratio))+ 
+  geom_smooth(method = "lm",color="black")  + 
+  geom_point(aes(color=Group),size=0.5) +  
+  ylab("mean rlog (up genes) / mean rlog (down genes)")+
+  theme_bw()+
+  facet_wrap(~DI_group_3SEM,scale="free_x")+
+  scale_color_manual(values=c("lightskyblue","blue","salmon1","hotpink4"))+
+  theme(axis.title.y = element_text(size = 7))+
+  theme(axis.title.x = element_text(size = 7))+
+  stat_cor(size=3)
+
+
+ggplot(index_NOR_df, aes(DI_4M,ratio))+ 
+  geom_smooth(method = "lm",color="black")  + 
+  geom_point(aes(color=DI_group_3SEM),size=0.5) +  
+  ylab("mean rlog (up genes) / mean rlog (down genes)")+
+  theme_bw()+
+  scale_color_manual(values=c("purple","mediumseagreen","orange"))+
+  theme(axis.title.y = element_text(size = 7))+
+  theme(axis.title.x = element_text(size = 7))+
+  stat_cor(size=3)
+
+```
+
+
+
+
+
